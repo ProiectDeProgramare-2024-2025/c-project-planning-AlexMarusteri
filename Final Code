@@ -1,0 +1,253 @@
+#include <iostream>
+#include <fstream>
+#include <sstream>
+#include <vector>
+#include <algorithm>
+
+#define RED     "\033[31m"
+#define GREEN   "\033[32m"
+#define YELLOW  "\033[33m"
+#define CYAN    "\033[36m"
+#define RESET   "\033[0m"
+
+class Listing {
+public:
+    std::string title;
+    float price;
+    std::string description;
+    float size;
+    int rooms;
+    int bathrooms;
+    bool hasParking;
+
+    Listing() = default;
+    Listing(std::string t, float p, std::string d, float s, int r, int b, bool park)
+        : title(std::move(t)), price(p), description(std::move(d)), size(s), rooms(r), bathrooms(b), hasParking(park) {}
+
+    std::string toCSV() const {
+        std::ostringstream oss;
+        oss << title << "," << price << "," << description << ","
+            << size << "," << rooms << "," << bathrooms << "," << hasParking;
+        return oss.str();
+    }
+
+    static Listing fromCSV(const std::string& line) {
+        std::vector<std::string> fields;
+        std::stringstream ss(line);
+        std::string item;
+        while (getline(ss, item, ',')) {
+            fields.push_back(item);
+        }
+        if (fields.size() != 7 || fields[0].empty()) {
+            throw std::runtime_error("Invalid CSV line: " + line);
+        }
+
+        return Listing(
+            fields[0],
+            std::stof(fields[1]),
+            fields[2],
+            std::stof(fields[3]),
+            std::stoi(fields[4]),
+            std::stoi(fields[5]),
+            std::stoi(fields[6])
+        );
+    }
+
+    void print() const {
+        std::cout << YELLOW "Title:" RESET " " << CYAN << title << RESET << "\n"
+                  << YELLOW "Price:" RESET " " << GREEN << "$" << price << RESET << "\n"
+                  << YELLOW "Description:" RESET " " << CYAN << description << RESET << "\n"
+                  << YELLOW "Size:" RESET " " << size << " sqm\n"
+                  << YELLOW "Rooms:" RESET " " << rooms << "\n"
+                  << YELLOW "Bathrooms:" RESET " " << bathrooms << "\n"
+                  << YELLOW "Parking:" RESET " " << (hasParking ? "Yes" : "No") << "\n"
+                  << "--------------" << std::endl;
+    }
+};
+
+class ListingManager {
+private:
+    std::string path;
+    std::string favoritesPath;
+
+public:
+    ListingManager(const std::string& filePath, const std::string& favPath = "favorites.txt")
+        : path(filePath), favoritesPath(favPath) {}
+
+    void addListing(const Listing& l) {
+        std::ofstream file(path, std::ios::app);
+        if (!file) {
+            std::cerr << RED "Unable to open file." RESET << std::endl;
+            return;
+        }
+        file << l.toCSV() << "\n";
+        file.close();
+        std::cout << GREEN "Listing added successfully!" RESET << std::endl;
+    }
+
+    std::vector<Listing> readListings(bool fromFavorites = false) {
+        std::ifstream file(fromFavorites ? favoritesPath : path);
+        std::vector<Listing> listings;
+        std::string line;
+        while (getline(file, line)) {
+            if (!line.empty()) {
+                try {
+                    listings.push_back(Listing::fromCSV(line));
+                } catch (...) {
+                    // Skip malformed lines
+                }
+            }
+        }
+        return listings;
+    }
+
+    void writeListings(const std::vector<Listing>& listings, bool toFavorites = false) {
+        std::ofstream file(toFavorites ? favoritesPath : path);
+        for (const auto& l : listings) {
+            file << l.toCSV() << "\n";
+        }
+    }
+
+    void displayListings(bool fromFavorites = false) {
+        auto listings = readListings(fromFavorites);
+        std::cout << GREEN << (fromFavorites ? "Favorite Listings" : "Current Listings") << RESET << "\n--------------" << std::endl;
+        for (size_t i = 0; i < listings.size(); ++i) {
+            std::cout << YELLOW "[" << i << "]" RESET << std::endl;
+            listings[i].print();
+        }
+    }
+
+    void viewDetails(int index, bool fromFavorites = false) {
+        auto listings = readListings(fromFavorites);
+        if (index >= 0 && index < listings.size()) {
+            listings[index].print();
+        } else {
+            std::cerr << RED "Invalid listing index." RESET << std::endl;
+        }
+    }
+
+    void addToFavorites(int index) {
+        auto listings = readListings();
+        if (index >= 0 && index < listings.size()) {
+            std::ofstream favFile(favoritesPath, std::ios::app);
+            favFile << listings[index].toCSV() << "\n";
+            favFile.close();
+            std::cout << GREEN "Added to favorites." RESET << std::endl;
+        } else {
+            std::cerr << RED "Invalid listing index." RESET << std::endl;
+        }
+    }
+
+    void purchaseListing(int index) {
+        auto listings = readListings();
+        if (index >= 0 && index < listings.size()) {
+            listings.erase(listings.begin() + index);
+            writeListings(listings);
+            std::cout << GREEN "Listing purchased and removed." RESET << std::endl;
+        } else {
+            std::cerr << RED "Invalid listing index." RESET << std::endl;
+        }
+    }
+
+    bool deleteByTitle(const std::string& title) {
+        auto listings = readListings();
+        auto it = std::remove_if(listings.begin(), listings.end(), [&](const Listing& l) {
+            return l.title == title;
+        });
+        bool removed = it != listings.end();
+        listings.erase(it, listings.end());
+        writeListings(listings);
+        return removed;
+    }
+
+    void editListing(int index, const Listing& updated) {
+        auto listings = readListings();
+        if (index >= 0 && index < listings.size()) {
+            listings[index] = updated;
+            writeListings(listings);
+            std::cout << GREEN "Listing updated successfully." RESET << std::endl;
+        } else {
+            std::cerr << RED "Invalid listing index." RESET << std::endl;
+        }
+    }
+};
+
+int main(int argc, char* argv[]) {
+    if (argc < 3) {
+        std::cout << RED "Usage: ./program <option> <file_path> [additional args...]" RESET << std::endl;
+        std::cout << YELLOW "Options: 1=add, 2=view, 3=delete, 4=sort, 5=view details, 6=favorite, 7=purchase, 8=view favorites, 9=edit" RESET << std::endl;
+        return 1;
+    }
+
+    int option = std::stoi(argv[1]);
+    std::string path = argv[2];
+    ListingManager manager(path);
+
+    switch(option) {
+        case 1: {
+            if (argc < 10) {
+                std::cerr << RED "Missing arguments for adding listing." RESET << std::endl;
+                return 1;
+            }
+            Listing l(argv[3], std::stof(argv[4]), argv[5], std::stof(argv[6]), std::stoi(argv[7]), std::stoi(argv[8]), std::stoi(argv[9]));
+            manager.addListing(l);
+            break;
+        }
+        case 2:
+            manager.displayListings();
+            break;
+        case 3: {
+            if (argc < 4) {
+                std::cerr << RED "Missing title for deletion." RESET << std::endl;
+                return 1;
+            }
+            bool success = manager.deleteByTitle(argv[3]);
+            std::cout << (success ? GREEN "Listing deleted successfully." : RED "Listing not found.") << RESET << std::endl;
+            break;
+        }
+        case 4:
+            manager.displayListings();
+            break;
+        case 5: {
+            if (argc < 4) {
+                std::cerr << RED "Missing index for viewing details." RESET << std::endl;
+                return 1;
+            }
+            manager.viewDetails(std::stoi(argv[3]));
+            break;
+        }
+        case 6: {
+            if (argc < 4) {
+                std::cerr << RED "Missing index for adding to favorites." RESET << std::endl;
+                return 1;
+            }
+            manager.addToFavorites(std::stoi(argv[3]));
+            break;
+        }
+        case 7: {
+            if (argc < 4) {
+                std::cerr << RED "Missing index for purchase." RESET << std::endl;
+                return 1;
+            }
+            manager.purchaseListing(std::stoi(argv[3]));
+            break;
+        }
+        case 8:
+            manager.displayListings(true);
+            break;
+        case 9: {
+            if (argc < 11) {
+                std::cerr << RED "Missing arguments for editing listing." RESET << std::endl;
+                return 1;
+            }
+            int index = std::stoi(argv[3]);
+            Listing updated(argv[4], std::stof(argv[5]), argv[6], std::stof(argv[7]), std::stoi(argv[8]), std::stoi(argv[9]), std::stoi(argv[10]));
+            manager.editListing(index, updated);
+            break;
+        }
+        default:
+            std::cout << RED "Invalid option." RESET << std::endl;
+    }
+
+    return 0;
+}
